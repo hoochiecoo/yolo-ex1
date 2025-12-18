@@ -17,8 +17,7 @@ dependencies:
   archive: ^3.0.0
   http: ^1.0.0
 
-  ultralytics_yolo:
-    path: ../
+  ultralytics_yolo: ^0.1.18
 
   cupertino_icons: ^1.0.8
 
