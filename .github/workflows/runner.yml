@@ -1,0 +1,141 @@
+name: Flutter CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.32.1'
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Cache Flutter pub
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ~/.dartServer
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Prepare dependency overrides (use pub ultralytics_yolo when local path missing)
+        run: |
+          if [ ! -d "../ultralytics_yolo" ]; then
+            echo "dependency_overrides:\n  ultralytics_yolo: any" > pubspec_overrides.yaml
+            echo "Created pubspec_overrides.yaml to use published ultralytics_yolo"
+          else
+            echo "Found local ../ultralytics_yolo; using path dependency"
+          fi
+      
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Accept Android licenses
+        if: runner.os == 'Linux'
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK components (build-tools/platforms)
+        if: runner.os == 'Linux'
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" || true
+
+      - name: Install common Android NDK versions (for native plugins)
+        if: runner.os == 'Linux'
+        run: |
+          sdkmanager --install \
+            "ndk;26.3.11579264" \
+            "ndk;26.1.10909125" \
+            "ndk;25.2.9519653" || true
+
+      - name: Cache Gradle
+        if: runner.os == 'Linux'
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: false
+
+      - name: Build Android APK (release)
+        if: runner.os == 'Linux'
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: |
+          flutter build apk --release --verbose
+
+      - name: Upload Android artifact
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-android-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      # iOS build (no codesign) on macOS runners
+      - name: Set up Ruby (for CocoaPods)
+        if: runner.os == 'macOS'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: false
+
+      - name: Install CocoaPods
+        if: runner.os == 'macOS'
+        run: |
+          gem install cocoapods --no-document
+
+      - name: Pod install
+        if: runner.os == 'macOS'
+        working-directory: ios
+        run: pod install --repo-update
+
+      - name: Build iOS (no codesign)
+        if: runner.os == 'macOS'
+        run: |
+          flutter build ios --release --no-codesign --verbose
+
+      - name: Upload iOS artifact (XCArchive and app)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-ios-build
+          path: |
+            build/ios/**/Build/Products/Release-iphoneos/*.app
+            build/ios/archive/*.xcarchive
+          if-no-files-found: warn
