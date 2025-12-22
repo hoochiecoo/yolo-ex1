@@ -10,6 +10,7 @@ class DetectionStatsDisplay extends StatelessWidget {
     required this.currentFps,
     this.leftElbowAngle,
     this.rightElbowAngle,
+    this.debugKeypointCount,
     this.showAngles = false,
   });
 
@@ -18,6 +19,7 @@ class DetectionStatsDisplay extends StatelessWidget {
   final double? leftElbowAngle;
   final double? rightElbowAngle;
   final bool showAngles;
+  final int? debugKeypointCount;
 
   @override
   Widget build(BuildContext context) {
@@ -57,6 +59,16 @@ class DetectionStatsDisplay extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            if (debugKeypointCount != null) ...[
+              const SizedBox(width: 8),
+              Text(
+                'KP: $debugKeypointCount',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ],
         ],
       ),

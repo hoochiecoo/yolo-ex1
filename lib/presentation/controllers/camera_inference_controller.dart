@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'package:ultralytics_yolo/models/yolo_result.dart';
 import 'package:ultralytics_yolo/widgets/yolo_controller.dart';
 import 'package:ultralytics_yolo/utils/error_handler.dart';
@@ -14,6 +15,7 @@ class CameraInferenceController extends ChangeNotifier {
   // Elbow angles (degrees), computed for pose task
   double? _leftElbowAngle;
   double? _rightElbowAngle;
+  int? _debugKeypointCount;
 
   // Detection state
   int _detectionCount = 0;
@@ -285,42 +287,184 @@ class CameraInferenceController extends ChangeNotifier {
    double? right;
 
    try {
-     // We take the first person's keypoints if multiple; you can extend to multi-person UI later
+     // Take the first detected person
      final first = results.isNotEmpty ? results.first : null;
-     if (first != null && first.keypoints != null && first.keypoints!.isNotEmpty) {
-       // Expecting keypoints as List<YOLOKeypoint> or similar map structure from plugin
-       final kps = first.keypoints!;
-       // Common COCO indices: 5=left shoulder, 7=left elbow, 9=left wrist
-       // 6=right shoulder, 8=right elbow, 10=right wrist
-       final ls = _getKeypointXY(kps, 5);
-       final le = _getKeypointXY(kps, 7);
-       final lw = _getKeypointXY(kps, 9);
-       final rs = _getKeypointXY(kps, 6);
-       final re = _getKeypointXY(kps, 8);
-       final rw = _getKeypointXY(kps, 10);
+     if (first != null) {
+       final kps = _extractKeypointList(first);
+       _debugKeypointCount = kps?.length;
+       if (kps != null && kps.isNotEmpty) {
+         // Common COCO indices: 5=left shoulder, 7=left elbow, 9=left wrist
+         // 6=right shoulder, 8=right elbow, 10=right wrist
+         final ls = _getKeypointXY(kps, 5);
+         final le = _getKeypointXY(kps, 7);
+         final lw = _getKeypointXY(kps, 9);
+         final rs = _getKeypointXY(kps, 6);
+         final re = _getKeypointXY(kps, 8);
+         final rw = _getKeypointXY(kps, 10);
 
-       if (ls != null && le != null && lw != null) {
-         left = _angleAtB(ls, le, lw);
-       }
-       if (rs != null && re != null && rw != null) {
-         right = _angleAtB(rs, re, rw);
+         if (ls != null && le != null && lw != null) {
+           left = _angleAtB(ls, le, lw);
+         }
+         if (rs != null && re != null && rw != null) {
+           right = _angleAtB(rs, re, rw);
+         }
        }
      }
-   } catch (_) {
-     // ignore parsing errors, keep angles null
+   } catch (e) {
+     // ignore parsing errors, keep angles null but log once to help debugging
+     // debugPrint('Pose parsing error: $e');
    }
 
    bool changed = (left != _leftElbowAngle) || (right != _rightElbowAngle);
    _leftElbowAngle = left;
    _rightElbowAngle = right;
+   // If no keypoints extracted, ensure debug flag null
+   if (left == null && right == null) {
+     _debugKeypointCount ??= 0;
+   }
 
    if (changed && !_isDisposed) {
      notifyListeners();
    }
  }
 
- // Helper to get (x,y) from keypoints list that may be List or List<Map>
+ // Try to extract a flat list of keypoints from various possible structures
+ List<dynamic>? _extractKeypointList(dynamic firstResult) {
+   dynamic container;
+   // Attempt common property names
+   try { container = firstResult.keypoints; } catch (_) {}
+   if (container == null) {
+     try { container = firstResult.kpts; } catch (_) {}
+   }
+   if (container == null) {
+     try { container = firstResult.pose; } catch (_) {}
+   }
+
+   List<dynamic>? asList = _asList(container);
+   if (asList != null) return asList;
+
+   // If container is an object with nested properties like points/xy/data/keypoints
+   final nestedKeys = ['points', 'xy', 'data', 'keypoints', 'kpts', 'joints', 'normalizedKeypoints'];
+   for (final key in nestedKeys) {
+     final nested = _getProp(container, key);
+     asList = _asList(nested);
+     if (asList != null) return asList;
+   }
+
+   // Some plugins wrap as {"keypoints": [...]}
+   if (container is Map) {
+     for (final key in nestedKeys) {
+       final nested = container[key];
+       asList = _asList(nested);
+       if (asList != null) return asList;
+     }
+   }
+
+   return null;
+ }
+
+ // Safe dynamic property access
+ dynamic _getProp(dynamic obj, String name) {
+   if (obj == null) return null;
+   if (obj is Map) return obj[name];
+   try { return obj.__proto__; } catch (_) {}
+   try { return obj.noSuchMethod; } catch (_) {}
+   try { return obj.toString; } catch (_) {}
+   try {
+     // Attempt via dynamic getter
+     switch (name) {
+       case 'points':
+         return obj.points;
+       case 'xy':
+         return obj.xy;
+       case 'data':
+         return obj.data;
+       case 'keypoints':
+         return obj.keypoints;
+       case 'kpts':
+         return obj.kpts;
+     }
+   } catch (_) {}
+   return null;
+ }
+
+ List<dynamic>? _asList(dynamic v) {
+   if (v == null) return null;
+   if (v is List) return v;
+   if (v is Float32List || v is Float64List || v is Int32List || v is Int16List || v is Int8List || v is Uint8List || v is Uint16List || v is Uint32List) {
+     return (v as Iterable).toList();
+   }
+   if (v is Iterable) return v.toList();
+   return null;
+ }
+   if (v == null) return null;
+   if (v is List) {
+     return v;
+   }
+   return null;
+ }
+
+ // Helper to get (x,y) from keypoints list that may be flat list, List<List>, List<Map>, or objects
  Offset? _getKeypointXY(List<dynamic> keypoints, int index) {
+   if (index < 0) return null;
+   if (keypoints.isEmpty) return null;
+
+   final first = keypoints.first;
+   // Case 1: flattened list of numbers of length 17*k (k >= 2)
+   if (first is num) {
+     final flat = keypoints.cast<num>();
+     if (flat.isEmpty) return null;
+     final n = flat.length;
+     // infer keypoint count ~17 (Ultralytics/COCO)
+     const kptCount = 17;
+     if (n % kptCount == 0) {
+       final stride = (n / kptCount).round();
+       if (stride >= 2 && index * stride + 1 < flat.length) {
+         final x = flat[index * stride + 0].toDouble();
+         final y = flat[index * stride + 1].toDouble();
+         return Offset(x, y);
+       }
+     }
+     return null;
+   }
+
+   // Case 2: list of lists [[x,y,(score)], ...]
+   if (index >= keypoints.length) return null;
+   final kp = keypoints[index];
+   if (kp == null) return null;
+   if (kp is List && kp.length >= 2) {
+     final x = (kp[0] as num?)?.toDouble();
+     final y = (kp[1] as num?)?.toDouble();
+     if (x == null || y == null) return null;
+     return Offset(x, y);
+   }
+
+   // Case 3: list of maps [{x:.., y:..}, ...]
+   if (kp is Map) {
+     final x = (kp['x'] as num?)?.toDouble();
+     final y = (kp['y'] as num?)?.toDouble();
+     if (x == null || y == null) return null;
+     return Offset(x, y);
+   }
+
+   // Case 4: object with x,y or point.x, point.y
+   try {
+     final x = (kp.x as num?)?.toDouble();
+     final y = (kp.y as num?)?.toDouble();
+     if (x != null && y != null) return Offset(x, y);
+   } catch (_) {}
+   try {
+     final p = kp.point ?? kp.pt ?? kp.xy;
+     final x = (p.x as num?)?.toDouble();
+     final y = (p.y as num?)?.toDouble();
+     if (x != null && y != null) return Offset(x, y);
+   } catch (_) {}
+
+   return null;
+ }
+
+ // Returns angle ABC at point B, in degrees, clamped [0, 180]
+ double _angleAtB(Offset a, Offset b, Offset c) {
    if (index < 0 || index >= keypoints.length) return null;
    final kp = keypoints[index];
    if (kp == null) return null;
@@ -360,6 +504,7 @@ class CameraInferenceController extends ChangeNotifier {
 
  double? get leftElbowAngle => _leftElbowAngle;
  double? get rightElbowAngle => _rightElbowAngle;
+ int? get debugKeypointCount => _debugKeypointCount;
 
  @override
   void dispose() {

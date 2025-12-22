@@ -38,6 +38,7 @@ class CameraInferenceOverlay extends StatelessWidget {
             currentFps: controller.currentFps,
             leftElbowAngle: controller.leftElbowAngle,
             rightElbowAngle: controller.rightElbowAngle,
+            debugKeypointCount: controller.debugKeypointCount,
             showAngles: controller.selectedModel == ModelType.pose,
           ),
           const SizedBox(height: 8),
