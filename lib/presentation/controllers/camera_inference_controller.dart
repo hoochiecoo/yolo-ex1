@@ -397,12 +397,6 @@ class CameraInferenceController extends ChangeNotifier {
    if (v is Iterable) return v.toList();
    return null;
  }
-   if (v == null) return null;
-   if (v is List) {
-     return v;
-   }
-   return null;
- }
 
  // Helper to get (x,y) from keypoints list that may be flat list, List<List>, List<Map>, or objects
  Offset? _getKeypointXY(List<dynamic> keypoints, int index) {
@@ -460,32 +454,6 @@ class CameraInferenceController extends ChangeNotifier {
      if (x != null && y != null) return Offset(x, y);
    } catch (_) {}
 
-   return null;
- }
-
- // Returns angle ABC at point B, in degrees, clamped [0, 180]
- double _angleAtB(Offset a, Offset b, Offset c) {
-   if (index < 0 || index >= keypoints.length) return null;
-   final kp = keypoints[index];
-   if (kp == null) return null;
-   if (kp is List && kp.length >= 2) {
-     final x = (kp[0] as num?)?.toDouble();
-     final y = (kp[1] as num?)?.toDouble();
-     if (x == null || y == null) return null;
-     return Offset(x, y);
-   }
-   if (kp is Map) {
-     final x = (kp['x'] as num?)?.toDouble();
-     final y = (kp['y'] as num?)?.toDouble();
-     if (x == null || y == null) return null;
-     return Offset(x, y);
-   }
-   // If plugin exposes a class with x,y
-   try {
-     final x = (kp.x as num?)?.toDouble();
-     final y = (kp.y as num?)?.toDouble();
-     if (x != null && y != null) return Offset(x, y);
-   } catch (_) {}
    return null;
  }
 
