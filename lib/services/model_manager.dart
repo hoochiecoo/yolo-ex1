@@ -215,4 +215,24 @@ class ModelManager {
 
   /// Updates the status message
   void _updateStatus(String message) => onStatusUpdate?.call(message);
+
+  /// Android-only: download a .tflite from URL into app documents and return path
+  Future<String?> cacheAndroidTfliteFromUrl(String url, {String? fileName}) async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final uri = Uri.parse(url);
+      final inferredName = fileName ?? (uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'model.tflite');
+      final name = inferredName.endsWith('.tflite') ? inferredName : '$inferredName.tflite';
+      if (!name.endsWith('.tflite')) return null;
+      _updateStatus('Downloading custom model...');
+      final bytes = await _downloadFile(url);
+      if (bytes == null || bytes.isEmpty) return null;
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$name');
+      await file.writeAsBytes(bytes, flush: true);
+      return file.path;
+    } catch (_) {
+      return null;
+    }
+  }
 }

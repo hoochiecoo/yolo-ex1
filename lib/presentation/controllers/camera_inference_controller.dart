@@ -1,6 +1,7 @@
 // Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 import 'package:flutter/material.dart';
+import 'dart:io';
 import 'package:ultralytics_yolo/models/yolo_result.dart';
 import 'package:ultralytics_yolo/widgets/yolo_controller.dart';
 import 'package:ultralytics_yolo/utils/error_handler.dart';
@@ -267,6 +268,51 @@ class CameraInferenceController extends ChangeNotifier {
       _downloadProgress = 0.0;
       notifyListeners();
       rethrow;
+    }
+  }
+
+  Future<void> loadCustomModelFromUrl(String url) async {
+    if (_isDisposed) return;
+    if (!Platform.isAndroid) {
+      // Minimal Android-only implementation: show message
+      _loadingMessage = 'Custom download supported on Android only in this build';
+      notifyListeners();
+      return;
+    }
+    _isModelLoading = true;
+    _loadingMessage = 'Downloading custom model...';
+    _downloadProgress = 0.0;
+    _detectionCount = 0;
+    _currentFps = 0.0;
+    notifyListeners();
+    try {
+      final lower = url.toLowerCase();
+      if (!(lower.startsWith('http://') || lower.startsWith('https://'))) {
+        throw Exception('URL must start with http(s)');
+      }
+      if (!lower.endsWith('.tflite')) {
+        throw Exception('URL must point to a .tflite file');
+      }
+      final path = await _modelManager.cacheAndroidTfliteFromUrl(url);
+      if (path == null) {
+        throw Exception('Failed to download model');
+      }
+      _modelPath = path;
+      // Ensure task is compatible: use detect for minimal Android-only flow
+      _selectedModel = ModelType.detect;
+      _isModelLoading = false;
+      _loadingMessage = '';
+      _downloadProgress = 0.0;
+      notifyListeners();
+    } catch (e) {
+      final error = YOLOErrorHandler.handleError(
+        e,
+        'Failed to download custom model',
+      );
+      _isModelLoading = false;
+      _loadingMessage = 'Failed to load model: ${error.message}';
+      _downloadProgress = 0.0;
+      notifyListeners();
     }
   }
 

@@ -31,6 +31,7 @@ class CameraInferenceOverlay extends StatelessWidget {
             selectedModel: controller.selectedModel,
             isModelLoading: controller.isModelLoading,
             onModelChanged: controller.changeModel,
+            onCustomUrlSubmitted: controller.loadCustomModelFromUrl,
           ),
           SizedBox(height: isLandscape ? 8 : 12),
           DetectionStatsDisplay(
